@@ -1,0 +1,6 @@
+/.idea/
+*.iml
+**/target
+.project
+/src/main/resources/config.properties
+/src/main/resources/dataset.json
