@@ -1,7 +1,10 @@
 package com.cosmos.demo;
 
 import com.cosmos.demo.config.Config;
-import com.mongodb.*;
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientOptions;
+import com.mongodb.MongoClientURI;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -13,6 +16,7 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
@@ -23,6 +27,7 @@ public class CosmosConnectionTester {
 
     public static final long PERIOD_SECONDS = 30 * 60;
     private static final long KEEP_ALIVE_PERIOD = 10;
+
     public static final int MAX_CONNECTION_IDLE_TIME = 0;
 
     // CosmosDB configuration
@@ -39,18 +44,32 @@ public class CosmosConnectionTester {
         final CosmosConnectionTester proc = new CosmosConnectionTester().start();
 
         final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
-        scheduler.scheduleAtFixedRate(() -> {
-            try {
-                proc.findDomains();
-            } catch (MongoSocketException e) {
-                System.out.println("MongoSocketException");
-                e.printStackTrace();
-            } catch (Exception e) {
-                e.printStackTrace();
-                System.out.println("Exception :");
-            }
-        }, 0l, PERIOD_SECONDS, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> retry(o -> proc.findDomains(), 2),
+            0l, PERIOD_SECONDS, TimeUnit.SECONDS);
 //        scheduler.scheduleAtFixedRate(() -> proc.keepAlive(), 0l, KEEP_ALIVE_PERIOD, TimeUnit.SECONDS);
+    }
+
+    public static <T> void retry(Consumer<T> c, int attempts) {
+
+        if (attempts == 0)
+            return;
+        else if (attempts == 1) {
+            try {
+                c.accept(null);
+            } catch (Exception e) {
+                System.out.println("Error: " + e.getMessage() + ", attempts exhausted!");
+                e.printStackTrace();
+            }
+        } else {
+            try {
+                c.accept(null);
+            } catch (Exception e) {
+                int attempsLeft = attempts - 1;
+                System.out.println("Error: " + e.getMessage() + ", re-trying (" + attempsLeft + ")");
+                e.printStackTrace();
+                retry(c, attempsLeft);
+            }
+        }
     }
 
     private CosmosConnectionTester start() {
