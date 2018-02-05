@@ -25,14 +25,16 @@ public class PerformanceTester {
     public static final String COLLECTION = "";
     public static final String SECRET = "";
 
+    private int failedCount = 0;
+
     public static void main(String[] args) throws InterruptedException {
         final PerformanceTester tester = new PerformanceTester();
         tester.run();
     }
 
     private void run() throws InterruptedException {
-        final long executionsCount = 100000;
-        final long threadCount = 4;
+        final long executionsCount = 200_000;
+        final long threadCount = 8;
 
         final ExecutorService executor = Executors.newFixedThreadPool(4);
         System.out.println(">> Starting");
@@ -53,7 +55,9 @@ public class PerformanceTester {
                 final Document document = buildMongoDocument();
                 try {
                     collection.insertOne(document);
+//                    System.out.println("Inserted from:" + Thread.currentThread().getId());
                 } catch (Exception e) {
+                    increaseFaildedCount();
                     System.out.println("ERROR: " + e.getMessage());
                 }
             };
@@ -75,6 +79,7 @@ public class PerformanceTester {
             System.out.println("Execution time (ms):\t" + executionTime);
             System.out.println("Ratio (inserts/sec):\t" + (finalCount - initialCount) / (executionTime / 1000));
             System.out.println(format("Created: %s", finalCount - initialCount));
+            System.out.println(format("Failed: %s", failedCount));
             System.out.println(format("Does count match? %s", (finalCount - initialCount) == executionsCount));
         }
     }
@@ -156,6 +161,11 @@ public class PerformanceTester {
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         };
         return CONTENT_TYPES[ThreadLocalRandom.current().nextInt(CONTENT_TYPES.length)];
+    }
+
+    // TODO implement without blocking
+    synchronized void increaseFaildedCount() {
+        failedCount++;
     }
 
 }
