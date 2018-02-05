@@ -1,5 +1,6 @@
 package com.cosmos.demo;
 
+import com.cosmos.demo.config.Config;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientOptions;
 import com.mongodb.MongoClientURI;
@@ -21,9 +22,9 @@ import static java.lang.String.format;
  */
 public class PerformanceTester {
 
-    public static final String ACCOUNT = "";
-    public static final String COLLECTION = "";
-    public static final String SECRET = "";
+    public static final String ACCOUNT = Config.getInstance().getString("cosmos.account");
+    public static final String COLLECTION = Config.getInstance().getString("cosmos.collection");
+    public static final String SECRET = Config.getInstance().getString("cosmos.secret");
 
     private int failedCount = 0;
 
@@ -33,8 +34,8 @@ public class PerformanceTester {
     }
 
     private void run() throws InterruptedException {
-        final long executionsCount = 200_000;
-        final long threadCount = 8;
+        final long executionsCount = 10_000;
+        final long threadCount = 4;
 
         final ExecutorService executor = Executors.newFixedThreadPool(4);
         System.out.println(">> Starting");
@@ -77,7 +78,7 @@ public class PerformanceTester {
             final long finalCount = collection.count();
             System.out.println(format("Final count: %s", finalCount));
             System.out.println("Execution time (ms):\t" + executionTime);
-            System.out.println("Ratio (inserts/sec):\t" + (finalCount - initialCount) / (executionTime / 1000));
+            System.out.println("Ratio (inserts/sec):\t" + Double.valueOf(finalCount - initialCount) / Double.valueOf(executionTime / 1000));
             System.out.println(format("Created: %s", finalCount - initialCount));
             System.out.println(format("Failed: %s", failedCount));
             System.out.println(format("Does count match? %s", (finalCount - initialCount) == executionsCount));
