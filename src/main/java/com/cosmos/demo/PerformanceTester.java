@@ -10,10 +10,10 @@ import org.bson.Document;
 
 import java.util.Arrays;
 import java.util.Date;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static java.lang.String.format;
 
@@ -26,18 +26,16 @@ public class PerformanceTester {
     public static final String COLLECTION = Config.getInstance().getString("cosmos.collection");
     public static final String SECRET = Config.getInstance().getString("cosmos.secret");
 
-    private int failedCount = 0;
-
     public static void main(String[] args) throws InterruptedException {
         final PerformanceTester tester = new PerformanceTester();
         tester.run();
     }
 
     private void run() throws InterruptedException {
-        final long executionsCount = 10_000;
-        final long threadCount = 4;
+        final long executionsCount = 1_000_000;
+        final int threadCount = 32;
 
-        final ExecutorService executor = Executors.newFixedThreadPool(4);
+        final ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         System.out.println(">> Starting");
 
         final MongoClientOptions.Builder builder = new MongoClientOptions.Builder()
@@ -49,40 +47,64 @@ public class PerformanceTester {
             // Get collection
             final MongoDatabase database = mongoClient.getDatabase(ACCOUNT);
             final MongoCollection<Document> collection = database.getCollection(COLLECTION);
+            System.out.println("Connected to: " + collection.getNamespace());
 
             final long initialCount = collection.count();
 
-            final Runnable task = () -> {
-                final Document document = buildMongoDocument();
-                try {
-                    collection.insertOne(document);
-//                    System.out.println("Inserted from:" + Thread.currentThread().getId());
-                } catch (Exception e) {
-                    increaseFaildedCount();
-                    System.out.println("ERROR: " + e.getMessage());
-                }
-            };
+            final List<Callable<Boolean>> callables = LongStream
+                .rangeClosed(1, executionsCount)
+                .mapToObj(i -> (Callable<Boolean>) () -> {
+                    try {
+                        collection.insertOne(buildMongoDocument());
+                        return Boolean.TRUE;
+                    } catch (Exception e) {
+                        System.out.println("ERROR: " + e.getMessage());
+                        return Boolean.FALSE;
+                    }
+                })
+                .collect(Collectors.toList());
+
+            System.out.println("Tasks initialized");
 
             long init = System.currentTimeMillis();
-            for (long i = 0; i < executionsCount; i++) {
-                if (threadCount == 1)
-                    task.run();
-                else
-                    executor.submit(task);
-            }
+            final List<Future<Boolean>> results = executor.invokeAll(callables);
             executor.shutdown();
 
             System.out.println(format("Threads terminated successfully? %s", executor.awaitTermination(60, TimeUnit.MINUTES)));
+
+            final Integer failedOperations = results.stream()
+                .map(this::getBooleanAsInt)
+                .reduce((v1, v2) -> v1 + v2)
+                .get();
+            final long successfulOperations = executionsCount - failedOperations;
+
             final long executionTime = System.currentTimeMillis() - init;
             System.out.println(format("Initial count: %s", initialCount));
             final long finalCount = collection.count();
             System.out.println(format("Final count: %s", finalCount));
             System.out.println("Execution time (ms):\t" + executionTime);
-            System.out.println("Ratio (inserts/sec):\t" + Double.valueOf(finalCount - initialCount) / Double.valueOf(executionTime / 1000));
-            System.out.println(format("Created: %s", finalCount - initialCount));
-            System.out.println(format("Failed: %s", failedCount));
-            System.out.println(format("Does count match? %s", (finalCount - initialCount) == executionsCount));
+            System.out.println("Ratio (ops/sec):\t" + Double.valueOf(successfulOperations) / Double.valueOf(executionTime / 1000));
+            System.out.println(format("Successful: %s", finalCount - initialCount));
+            System.out.println(format("Failed: %s", failedOperations));
+            System.out.println(format("Does count match? %s", successfulOperations == executionsCount));
         }
+    }
+
+    /**
+     * true -> 0, false -> 1
+     */
+    private Integer getBooleanAsInt(Future<Boolean> r) {
+        try {
+            return r.get(60, TimeUnit.SECONDS) ? 0 : 1;
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            System.out.println("Error getting value:");
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    private String buildConnectionUrl(String account, String key) {
+        return String.format("mongodb://%s:%s@%s.documents.azure.com:10255/?ssl=true&replicaSet=globaldb", account, key, account);
     }
 
     private Document buildMongoDocument() {
@@ -118,7 +140,7 @@ public class PerformanceTester {
     }
 
     private String radomFilename() {
-        final String[] BOOKS = new String[]{
+        return selectRandomValue(
             "The Diamond Age: or A Young Lady's Illustrated Primer",
             "Cryptonomicon",
             "Quicksilver",
@@ -133,16 +155,11 @@ public class PerformanceTester {
             "The Rise of Endymion",
             "The Stars My Destination",
             "Doomsday Book"
-        };
-        return BOOKS[ThreadLocalRandom.current().nextInt(BOOKS.length)];
-    }
-
-    private String buildConnectionUrl(String account, String key) {
-        return String.format("mongodb://%s:%s@%s.documents.azure.com:10255/?ssl=true&replicaSet=globaldb", account, key, account);
+        );
     }
 
     private String randomAuthor() {
-        final String[] AUTHORS = new String[]{
+        return selectRandomValue(
             "Neal Stephenson",
             "J. R. R. Tolkien",
             "Dan Simmons",
@@ -150,23 +167,20 @@ public class PerformanceTester {
             "Alfred Bester",
             "Connie Willis",
             "William Gibson"
-        };
-        return AUTHORS[ThreadLocalRandom.current().nextInt(AUTHORS.length)];
+        );
     }
 
     private String randomContentType() {
-        final String[] CONTENT_TYPES = new String[]{
+        return selectRandomValue(
             "application/json",
             "application/pdf",
             "application/vnd.ms-excel",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        };
-        return CONTENT_TYPES[ThreadLocalRandom.current().nextInt(CONTENT_TYPES.length)];
+        );
     }
 
-    // TODO implement without blocking
-    synchronized void increaseFaildedCount() {
-        failedCount++;
+    private String selectRandomValue(String... words) {
+        return words[ThreadLocalRandom.current().nextInt(words.length)];
     }
 
 }
